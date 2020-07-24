@@ -1,0 +1,117 @@
+---
+title: "A la découverte des hexmaps"
+author: "jcantet"
+date: "23/07/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(sf)
+```
+
+## Objectifs
+Tester la création de carte avec un découpage hexagonal en s'appuyant sur des exemples disponibles :
+- Carte de la consommation électrique : <http://nc233.com/2020/06/hex-map-of-electricity-consumption/>
+- Carte des cafés/bars : <https://statnmap.com/2019-11-08-30daymapchallenge-building-maps-1/>
+
+
+## Données
+Utilisation d'un jeu de données sur les gares ferroviaires frnaçaises mis à disposition sur datagouv.fr par un utilisateur.
+
+```{r data_prep}
+# Importation
+gares <- read.csv2("C:/Users/jorda/Documents/exploRation/hexmap/00_Inputs/gares.csv")
+# Suppression des doublons (cas des gares traversées par plusieurs lignes) et des gares non exploitées
+gares <- gares %>%
+  filter(NATURE != "Non exploitée") %>% 
+  distinct(.data = .,NOM, .keep_all = TRUE) %>% 
+  rename("lat" = "LATITUDE..WGS84.",
+         "lng" = "LONGITUDE..WGS84.")
+# Conversion avec la projection Lambert93 qui sera aussi utilisée pour le fond de carte
+gares_93 <- gares %>% 
+  st_as_sf(coords = c("lng", "lat"),crs = 4326) %>% #4326 = WGS84
+  st_transform(crs = 2154) # 2154 = Lambert-93
+
+# Fond de carte (hors outre-mer) (Projection WGS84 à la base, car il y a l'outre-mer également)
+France <- st_read("C:/Users/jorda/Documents/exploRation/Referentiels cartographie/DEPARTEMENT.shp") %>% 
+  filter(!(INSEE_DEP %in% c("971","972","973","974","976","978")))
+# st_crs(France)
+# France[1]
+# plot(France$geometry)
+
+# Projection en Lambert 93 car on ne garde que la métropole, et Lambert93 et la projection de référence pour la métropoe
+France_93 <- st_transform(France, crs = 2154)
+# st_crs(France_93)
+# France_93[1]
+# plot(France_93$geometry)
+
+# Test vérification
+ggplot(data = France_93)+
+  geom_sf()
+
+```
+
+## Technique 1 
+
+```{r representation carte}
+ggplot()+
+  geom_sf(data = gares_93, 
+             alpha = 0.4, color= "steelblue", size = 1)+
+  theme_void()+
+  geom_sf(data = France_93, fill = "Transparent")+ # Fond de carte
+  labs(title = "Carte des gares exploitées en France")
+
+
+```
+
+```{r conversion_projection}
+# Retrait des variables inutilisées
+gares_93 <- gares_93 %>%  
+  select(-CODE_LIGNE, -NOM, -NATURE)
+
+# Agrégation des coordonnées GPS dans 1 variable dans une liste, puis découpage en autant de lignes que de gares, puis transformation de la liste en format sf
+gares_93_combine <- st_union(gares_93) %>% 
+  st_cast("POINT") %>% 
+  st_sf(crs = 2154)
+
+# Transformation de la carte de France en grille d'hexagones
+France_hex <- France_93 %>%
+  st_make_grid(what = "polygons", square = FALSE, n = c(50,25)) %>% 
+  st_sf() %>% 
+  mutate(id_hex = 1:n()) %>% 
+  select(id_hex, geometry)
+
+
+# Jointure entre la carte de France hex et les gares, puis comptage
+gares_93_hex <- st_join(x = gares_93_combine,y = France_hex)
+gares_hex_count <- gares_93_hex %>% 
+  st_drop_geometry() %>% 
+  count(id_hex)
+
+France_hex_gares <- France_hex %>% 
+  left_join(gares_hex_count) %>% 
+  mutate(n = ifelse(is.na(n),0,n))
+
+ggplot(France_hex_gares) +
+  geom_sf(aes(fill = n), size = 0.1) +
+    scale_fill_gradient(
+    high = "#AD1128",
+    low = "grey80", na.value = NA,
+    trans = "log", 
+    breaks = c(0, 5, 15, 80)
+  ) +
+  labs(
+    title = "Nombre de gares en France",
+    subtitle = "Un maillage plus important dans le Nord Est, l'impact du relief",
+    caption = "@jcantet - source: data.gouv.fr",
+    x = NULL, y = NULL,
+    fill = "Number"
+  ) +
+  coord_sf(crs = 2154)
+
+
+```
+
