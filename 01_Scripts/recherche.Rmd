@@ -79,7 +79,7 @@ gares_93_combine <- st_union(gares_93) %>%
 
 # Transformation de la carte de France en grille d'hexagones
 France_hex <- France_93 %>%
-  st_make_grid(what = "polygons", square = FALSE, n = c(50,25)) %>% 
+  st_make_grid(what = "polygons", square = FALSE, n = c(100,50)) %>% 
   st_sf() %>% 
   mutate(id_hex = 1:n()) %>% 
   select(id_hex, geometry)
@@ -109,9 +109,7 @@ ggplot(France_hex_gares) +
     caption = "@jcantet - source: data.gouv.fr",
     x = NULL, y = NULL,
     fill = "Number"
-  ) +
-  coord_sf(crs = 2154)
-
+  )
 
 ```
 
